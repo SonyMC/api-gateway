@@ -1,0 +1,119 @@
+version: '3.7'
+
+## Note : The values specified in the enviroment properties here overrides those specified in the application.properties file.
+## This script has a problem when you run it the first time .zipkin server will try to connect to rabbitmq before its up for the first time. Better to run the Rabbit MQ Script in a separate docker compose.
+services:
+# *** No.1 *** 
+  currency-exchange:
+    image: mailsonymathew/mmv2-currency-exchange-service-v2:0.0.1-SNAPSHOT
+# The memory set aside for the microservice    
+    mem_limit: 700m
+# The port on which the microservice is exposed     
+    ports:
+      - "8000:8000"
+# The network being used commonly by all microservices. This NW is defined towards the end.       
+    networks:
+      - currency-network
+# The dependency of the microservice on any other       
+    depends_on:
+      - naming-server
+      - rabbitmq
+# The environment configuration. Here we are specifying the eureka naming server url by replacing local host with 'naming-server' as specified below. 
+# Also Spring env name must be in camel case without underscores!!!      
+# However Rabit MQ env detaisl must be in caps!!!   
+    environment:
+      eureka.client.serviceUrl.defaultZone: http://naming-server:8761/eureka
+      spring.zipkin.baseUrl: http://zipkin-server:9411/
+      RABBIT_URI: amqp://guest:guest@rabbitmq:5672 
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_ZIPKIN_SENDER_TYPE: rabbit      
+
+# *** No.2 *** 
+  currency-conversion:
+   image: mailsonymathew/mmv2-currency-conversion-service-v2:0.0.1-SNAPSHOT
+# The memory set aside for the microservice    
+   mem_limit: 700m
+# The port on which the microservice is exposed     
+   ports:
+      - "8100:8100"
+# The network being used commonly by all microservices. This NW is defined towards the end.       
+   networks:
+      - currency-network
+# The dependency of the microservice on any other       
+   depends_on:
+      - naming-server
+      - rabbitmq     
+# The environment configuration. Here we are specifying the eureka naming server url by replacing local host with 'naming-server' as specified below. Also the env name must be in camel case without underscores!!!      
+# Similarly we are also configuring the zipkin url
+# We also need to replace the direct url ( class CurrencyConversionController, method convertCurrency). The feign uri in the controller class willwork fine because it uses a proxy. 
+   environment:
+      eureka.client.serviceUrl.defaultZone: http://naming-server:8761/eureka
+      spring.zipkin.baseUrl: http://zipkin-server:9411/
+      currencyexchange.uri: http://currency-exchange:8000/currency-exchange/from/{from}/to/{to}
+      RABBIT_URI: amqp://guest:guest@rabbitmq:5672
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_ZIPKIN_SENDER_TYPE: rabbit             
+
+# *** No.3 *** 
+  api-gateway:
+   image: mailsonymathew/mmv2-api-gateway:0.0.1-SNAPSHOT
+# The memory set aside for the microservice    
+   mem_limit: 700m
+# The port on which the microservice is exposed     
+   ports:
+      - "8765:8765"
+# The network being used commonly by all microservices. This NW is defined towards the end.       
+   networks:
+      - currency-network
+# The dependency of the microservice on any other       
+   depends_on:
+      - naming-server
+      - rabbitmq     
+# The environment configuration. Here we are specifying the eureka naming server url by replacing local host with 'naming-server' as specified below. Also the env name must be in camel case without underscores!!!      
+# Similarly we are also configuring the zipkin url
+   environment:
+      eureka.client.serviceUrl.defaultZone: http://naming-server:8761/eureka
+      eureka.client.fetchregistry: "true"
+      spring.zipkin.baseUrl: http://zipkin-server:9411/
+      RABBIT_URI: amqp://guest:guest@rabbitmq:5672
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_ZIPKIN_SENDER_TYPE: rabbit
+
+# *** No.4 ***             
+  naming-server:
+    image: mailsonymathew/mmv2-netflix-eureka-naming-server-v2:0.0.1-SNAPSHOT
+    mem_limit: 700m
+    ports:
+      - "8761:8761"
+    networks:
+      - currency-network
+
+# *** No.5 ***       
+  zipkin-server:
+    image: openzipkin/zipkin:2.23
+    mem_limit: 300m
+    ports:
+      - "9411:9411"
+    networks:
+      - currency-network
+ # Add rabbit dependency to zipkin 
+    environment:
+ #     rabbitUri: amqp://guest:guest@rabbitmq:5672  # amqp://user:pwd@rabbitmq:port
+      RABBIT_URI: amqp://guest:guest@rabbitmq:5672
+    depends_on:
+      - rabbitmq   
+    restart: always # This is required as essentially Zipkin starts before Rabbit MQ and will crash.
+
+# *** No.6 *** Note: Run this first a a separate docker compose. Else it will show issues as zipkin will try to connect even efoe thsi is up    
+  rabbitmq:
+    image: rabbitmq:3.8.12-management
+    mem_limit: 300m
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - currency-network                    
+
+# Networks to be created to facilitate communication between containers
+networks:
+  currency-network:  
